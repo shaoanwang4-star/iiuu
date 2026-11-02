@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>漫画站</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; background: #f6f7f9; color: #22262b; }
+  a { color: #2f6fed; text-decoration: none; }
+  header { display: flex; align-items: center; gap: 18px; padding: 14px 22px; background: #fff; border-bottom: 1px solid #e6e8ec; position: sticky; top: 0; z-index: 5; }
+  header b { font-size: 18px; }
+  header nav { display: flex; gap: 14px; margin-left: auto; }
+  main { max-width: 1080px; margin: 0 auto; padding: 22px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
+  input, select, textarea, button { font: inherit; padding: 7px 11px; border: 1px solid #cfd4dc; border-radius: 8px; background: #fff; }
+  button { cursor: pointer; background: #2f6fed; color: #fff; border-color: #2f6fed; }
+  button.ghost { background: #fff; color: #444; border-color: #cfd4dc; }
+  button.danger { background: #e04b4b; border-color: #e04b4b; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid #b9cffa; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 5px 12px; border-radius: 999px; border: 1px solid #cfd4dc; background: #fff; cursor: pointer; }
+  .chip.on { background: #22262b; color: #fff; border-color: #22262b; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 18px; }
+  .card { background: #fff; border: 1px solid #e6e8ec; border-radius: 12px; overflow: hidden; display: block; color: inherit; }
+  .card:hover { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+  .cover { aspect-ratio: 3/4; background: #eceef2; display: flex; align-items: center; justify-content: center; color: #9aa1ac; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .meta { padding: 8px 10px; }
+  .card .meta strong { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .meta span { font-size: 12px; color: #7a828d; }
+  .empty { padding: 60px 0; text-align: center; color: #8b93a0; }
+  .detail { display: flex; gap: 24px; align-items: flex-start; }
+  .detail .cover { width: 240px; flex: none; border-radius: 12px; border: 1px solid #e6e8ec; }
+  .detail h1 { margin: 0 0 6px; font-size: 24px; }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #eef3ff; color: #2f6fed; font-size: 12px; margin-right: 6px; }
+  .panel { background: #fff; border: 1px solid #e6e8ec; border-radius: 12px; padding: 16px; margin-bottom: 18px; }
+  .panel h2 { margin: 0 0 12px; font-size: 17px; }
+  ul.chapters { list-style: none; margin: 0; padding: 0; }
+  ul.chapters li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #f0f2f5; }
+  ul.chapters li:last-child { border-bottom: 0; }
+  .reader { text-align: center; }
+  .reader .stage { position: relative; min-height: 60vh; display: flex; align-items: flex-start; justify-content: center; background: #14161a; border-radius: 12px; }
+  .reader img { max-width: 100%; display: block; margin: 0 auto; }
+  .zone { position: fixed; top: 96px; bottom: 84px; width: 28%; cursor: pointer; z-index: 2; }
+  .zone.prev { left: 0; } .zone.next { right: 0; }
+  .ctrl { display: flex; gap: 10px; justify-content: center; align-items: center; padding: 14px 0; flex-wrap: wrap; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  label { font-size: 13px; color: #5a616b; }
+  fieldset { border: 1px solid #e6e8ec; border-radius: 10px; padding: 12px; margin: 0 0 14px; }
+  legend { padding: 0 6px; font-size: 13px; color: #5a616b; }
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #22262b; color: #fff; padding: 9px 16px; border-radius: 8px; opacity: 0; transition: .2s; pointer-events: none; z-index: 9; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <b><a href="#/">漫画站</a></b>
+  <nav><a href="#/">浏览</a><a href="#/admin">后台</a></nav>
+</header>
+<main id="app"></main>
+<div id="toast"></div>
+<script>
+const app = document.getElementById("app");
+const token = () => sessionStorage.getItem("admin_token") || "";
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (ch) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+function toast(msg, ms = 2200) {
+  const el = document.getElementById("toast");
+  el.textContent = msg; el.className = "on";
+  clearTimeout(toast.t); toast.t = setTimeout(() => (el.className = ""), ms);
+}
+async function req(path, opts = {}) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+  return data;
+}
+const apiPost = (p, b) => req(p, {
+  method: "POST",
+  headers: { "content-type": "application/json", authorization: `Bearer ${token()}` },
+  body: JSON.stringify(b ?? {}),
+});
+const apiDel = (p) => req(p, { method: "DELETE", headers: { authorization: `Bearer ${token()}` } });
+const apiForm = (p, fd) => req(p, { method: "POST", headers: { authorization: `Bearer ${token()}` }, body: fd });
+const coverHtml = (c) => c.cover
+  ? `<img src="${esc(c.cover)}" alt="${esc(c.title)}" loading="lazy">`
+  : `<span>暂无封面</span>`;
+
+// ---------- 列表 ----------
+let filter = { q: "", category: "" };
+async function viewList() {
+  app.innerHTML = `
+    <div class="bar">
+      <input id="q" placeholder="搜索标题或作者" value="${esc(filter.q)}" size="22">
+      <div class="chips" id="chips"></div>
+    </div>
+    <div id="grid"><div class="empty">加载中…</div></div>`;
+  const q = document.getElementById("q");
+  const repaint = () => {
+    if (document.activeElement !== q) q.value = filter.q;
+    refreshList();
+  };
+  let t;
+  q.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { filter.q = q.value.trim(); refreshList(); }, 250); });
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(t); filter.q = q.value.trim(); refreshList(); } });
+  repaint();
+}
+async function refreshList() {
+  const params = new URLSearchParams();
+  if (filter.q) params.set("q", filter.q);
+  if (filter.category) params.set("category", filter.category);
+  const [{ comics }, { categories }] = await Promise.all([
+    req(`/api/comics?${params}`), req("/api/categories"),
+  ]);
+  document.getElementById("chips").innerHTML = ["", ...categories.map((x) => x.category)]
+    .map((x) => `<span class="chip${filter.category === x ? " on" : ""}" data-cat="${esc(x)}">${esc(x || "全部")}</span>`).join("");
+  document.getElementById("grid").innerHTML = comics.length ? `<div class="grid">${comics.map((c) => `
+      <a class="card" href="#/comic/${c.id}">
+        <div class="cover">${coverHtml(c)}</div>
+        <div class="meta"><strong>${esc(c.title)}</strong>
+          <span>${esc(c.category)} · ${c.chapter_count} 话</span></div>
+      </a>`).join("")}</div>` : `<div class="empty">没有匹配的漫画</div>`;
+  document.querySelectorAll("[data-cat]").forEach((el) =>
+    el.addEventListener("click", () => { filter.category = el.dataset.cat; refreshList(); }));
+}
+
+// ---------- 详情 ----------
+async function viewComic(id) {
+  const { comic, chapters } = await req(`/api/comics/${id}`);
+  app.innerHTML = `
+    <div class="detail">
+      <div class="cover">${coverHtml(comic)}</div>
+      <div>
+        <h1>${esc(comic.title)}</h1>
+        <div style="margin-bottom:10px">
+          <span class="tag">${esc(comic.category)}</span>
+          ${comic.author ? `<span class="tag">${esc(comic.author)}</span>` : ""}
+        </div>
+        <p>${esc(comic.description) || "暂无简介"}</p>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:22px">
+      <h2>章节（${chapters.length}）</h2>
+      ${chapters.length ? `<ul class="chapters">${chapters.map((ch) => `
+        <li><a href="#/read/${comic.id}/${ch.id}">第 ${ch.num} 话 ${esc(ch.title || "未命名")}</a>
+          <span style="color:#7a828d;font-size:13px">${ch.page_count} 页</span></li>`).join("")}</ul>`
+        : `<div class="empty">还没有章节</div>`}
+    </div>`;
+}
+
+// ---------- 阅读器 ----------
+let reader = null;
+async function viewReader(chapterId) {
+  const data = await req(`/api/chapters/${chapterId}`);
+  reader = data;
+  const total = data.pages.length;
+  app.innerHTML = `
+    <div class="reader">
+      <div class="ctrl">
+        <a class="chip" href="#/comic/${data.chapter.comic_id}">返回目录</a>
+        <b>${esc(data.chapter.comic_title)} · 第 ${data.chapter.num} 话 ${esc(data.chapter.title || "")}</b>
+      </div>
+      <div class="stage" id="stage"></div>
+      <div class="ctrl">
+        <button class="ghost" id="p" ${!data.prevChapterId ? "disabled" : ""}>← 上一章</button>
+        <span id="pos" style="min-width:70px"></span>
+        <button class="ghost" id="n" ${!data.nextChapterId ? "disabled" : ""}>下一章 →</button>
+      </div>
+    </div>
+    <div class="zone prev" id="zp"></div><div class="zone next" id="zn"></div>`;
+  document.getElementById("p").onclick = () => go(`#/read/${data.chapter.comic_id}/${data.prevChapterId}`);
+  document.getElementById("n").onclick = () => go(`#/read/${data.chapter.comic_id}/${data.nextChapterId}`);
+  reader.i = 0;
+  showPage(0);
+  document.getElementById("zp").onclick = () => step(-1);
+  document.getElementById("zn").onclick = () => step(1);
+}
+function showPage(i) {
+  const { pages } = reader;
+  reader.i = Math.max(0, Math.min(pages.length - 1, i));
+  const stage = document.getElementById("stage");
+  const pos = document.getElementById("pos");
+  if (!pages.length) {
+    stage.innerHTML = `<div class="empty">本章还没有页图</div>`;
+    pos.textContent = "0 / 0";
+    return;
+  }
+  const p = pages[reader.i];
+  stage.innerHTML = `<img src="${esc(p.url)}" alt="第 ${p.idx + 1} 页" loading="lazy">`;
+  pos.textContent = `${reader.i + 1} / ${pages.length}`;
+  window.scrollTo(0, 0);
+}
+const step = (d) => showPage(reader ? reader.i + d : 0);
+addEventListener("keydown", (e) => {
+  if (!location.hash.startsWith("#/read/") || /input|textarea|select/i.test(e.target.tagName)) return;
+  if (e.key === "ArrowLeft") step(-1);
+  if (e.key === "ArrowRight") step(1);
+});
+
+// ---------- 后台 ----------
+async function viewAdmin() {
+  const { comics } = await req("/api/comics?limit=100");
+  app.innerHTML = `
+    <div class="panel">
+      <h2>管理员令牌</h2>
+      <div class="row"><input id="tok" type="password" placeholder="粘贴 ADMIN_TOKEN" size="30" value="${esc(token())}">
+        <button id="savetok">保存</button></div>
+      <label>令牌只存在当前标签页（sessionStorage）；写接口靠它鉴权。</label>
+    </div>
+    <div class="panel">
+      <h2>新建漫画</h2>
+      <div class="row"><input id="nt" placeholder="标题 *" size="22"><input id="na" placeholder="作者" size="14">
+        <input id="nc" placeholder="分类" size="10"></div>
+      <div class="row"><textarea id="nd" placeholder="简介" rows="2" cols="60"></textarea></div>
+      <button id="add">创建</button>
+    </div>
+    <div class="panel">
+      <h2>维护已有漫画</h2>
+      <div class="row"><select id="sel" size="1">${comics.map((c) =>
+        `<option value="${c.id}">${esc(c.title)}</option>`).join("") || "<option value=''>暂无漫画</option>"}</select>
+        <button class="danger" id="delc">删除该漫画</button></div>
+      <div id="manage"><div class="empty">请选择一本漫画</div></div>
+    </div>`;
+  document.getElementById("savetok").onclick = () => {
+    sessionStorage.setItem("admin_token", document.getElementById("tok").value.trim());
+    toast("令牌已保存");
+  };
+  document.getElementById("add").onclick = async () => {
+    try {
+      await apiPost("/api/comics", {
+        title: document.getElementById("nt").value,
+        author: document.getElementById("na").value,
+        category: document.getElementById("nc").value,
+        description: document.getElementById("nd").value,
+      });
+      toast("已创建"); draw();
+    } catch (e) { toast(e.message); }
+  };
+  document.getElementById("delc").onclick = async () => {
+    const id = document.getElementById("sel").value;
+    if (!id || !confirm("删除该漫画及其所有章节与图片？")) return;
+    try { await apiDel(`/api/comics/${id}`); toast("已删除"); draw(); } catch (e) { toast(e.message); }
+  };
+  document.getElementById("sel").onchange = () => manage(document.getElementById("sel").value);
+  if (comics.length) manage(comics[0].id);
+}
+async function manage(id) {
+  const box = document.getElementById("manage");
+  const { comic, chapters } = await req(`/api/comics/${id}`);
+  box.innerHTML = `
+    <fieldset><legend>封面</legend><div class="row">
+      <input type="file" id="cv" accept="image/*"><button id="upcv">上传封面</button></div></fieldset>
+    <fieldset><legend>新章节</legend><div class="row">
+      <input id="cht" placeholder="章节名" size="20"><button id="addch">创建章节</button></div></fieldset>
+    <fieldset><legend>页图（可多选，按文件名顺序）</legend><div class="row">
+      <select id="chsel">${chapters.map((c) =>
+        `<option value="${c.id}">第 ${c.num} 话 ${esc(c.title || "")}</option>`).join("") || "<option value=''>先创建章节</option>"}</select>
+      <input type="file" id="pgs" accept="image/*" multiple><button id="uppg">上传</button></div></fieldset>
+    <ul class="chapters">${chapters.map((c) => `
+      <li><a href="#/read/${id}/${c.id}">第 ${c.num} 话 ${esc(c.title || "未命名")}</a>
+        <span style="color:#7a828d;font-size:13px">${c.page_count} 页</span>
+        <button class="ghost" style="margin-left:auto" data-del="${c.id}">删除</button></li>`).join("")
+      || "<li>暂无章节</li>"}</ul>`;
+  const pick = (sel) => document.getElementById(sel).files[0];
+  box.querySelector("#upcv").onclick = async () => {
+    const f = pick("cv"); if (!f) return toast("先选择图片");
+    const fd = new FormData(); fd.append("file", f);
+    try { await apiForm(`/api/comics/${id}/cover`, fd); toast("封面已更新"); } catch (e) { toast(e.message); }
+  };
+  box.querySelector("#addch").onclick = async () => {
+    try {
+      await apiPost(`/api/comics/${id}/chapters`, { title: document.getElementById("cht").value });
+      toast("章节已创建"); manage(id);
+    } catch (e) { toast(e.message); }
+  };
+  box.querySelector("#uppg").onclick = async () => {
+    const cid = document.getElementById("chsel").value;
+    if (!cid) return toast("请先创建章节");
+    const fs = document.getElementById("pgs").files;
+    if (!fs.length) return toast("先选择页图");
+    const fd = new FormData();
+    [...fs].forEach((f) => fd.append("files", f));
+    try { const r = await apiForm(`/api/chapters/${cid}/pages`, fd); toast(`已上传 ${r.added} 页`); manage(id); }
+    catch (e) { toast(e.message); }
+  };
+  box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    if (!confirm("删除该章节及其页图？")) return;
+    try { await apiDel(`/api/chapters/${b.dataset.del}`); toast("已删除"); manage(id); } catch (e) { toast(e.message); }
+  });
+}
+
+// ---------- 路由 ----------
+function go(hash) { if (location.hash === hash) draw(); else location.hash = hash; }
+function draw() {
+  const h = location.hash || "#/";
+  const seg = h.slice(2).split("/");
+  app.innerHTML = `<div class="empty">加载中…</div>`;
+  const run = seg[0] === "" ? viewList()
+    : seg[0] === "comic" ? viewComic(Number(seg[1]))
+    : seg[0] === "read" ? viewReader(Number(seg[2]))
+    : seg[0] === "admin" ? viewAdmin()
+    : viewList();
+  run.catch((e) => (app.innerHTML = `<div class="empty">${esc(e.message)}</div>`));
+}
+addEventListener("hashchange", draw);
+draw();
+</script>
+</body>
+</html>
